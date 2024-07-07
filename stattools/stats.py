@@ -123,7 +123,7 @@ def matern52_d2(dx, eta, l):
     
     return Kpp
 
-def get_cov_1D(cov_x, cov_t):
+def get_cov_1D(cov_x, cov_t, enable_nu):
 
     isotropy = False
     if cov_x == "matern12_xy":
@@ -152,7 +152,31 @@ def get_cov_1D(cov_x, cov_t):
     # isotropic cases
     isotropy = ("iso" in cov_x)
     #if cov_x == "matern2_iso" or True: # dev
-    if cov_x == "matern2_iso":
+    if enable_nu:
+        # for covariances based on distances
+        def Cu(x, y, d, nu, λ):
+            C = -(
+                y**2 * matern_general_d2(d, 1., nu, λ)
+                + x**2 * matern_general_d1(d, 1., nu, λ) / d
+            )/ d**2
+            C[np.isnan(C)] = -matern_general_d2(d[np.isnan(C)], 1.0, nu, λ)
+            return C
+        def Cv(x, y, d, nu, λ):
+            C = -(
+                x**2 * matern_general_d2(d, 1., nu, λ)
+                + y**2 * matern_general_d1(d, 1., nu, λ) / d
+            ) / d**2
+            C[np.isnan(C)] = -matern_general_d2(d[np.isnan(C)], 1.0, nu, λ)
+            return C
+        def Cuv(x, y, d, nu, λ):
+            C = x*y*(
+                    matern_general_d2(d, 1., nu, λ)
+                    - matern_general_d1(d, 1., nu, λ) / d
+                ) / d**2
+            C[np.isnan(C)] = 0.
+            return C
+        C = (Cu, Cv, Cuv)
+    elif cov_x == "matern2_iso":
         nu = 2
         #nu = 3/2 # dev
         # for covariances based on distances
@@ -229,9 +253,12 @@ def get_cov_1D(cov_x, cov_t):
     # dev
     #Cu, Cv, Cuv = (lambda x, y, d, λ: np.eye(*x.shape),)*3 
 
-    Ct = getattr(cov, cov_t)
+    if enable_nu:
+        Ct = matern_general
+    else:
+        Ct = getattr(cov, cov_t)
 
-    return C, Ct, isotropy
+    return C, Ct, isotropy, enable_nu
 
 def kernel_3d(x, xpr, params, C):
     """
@@ -295,7 +322,14 @@ def kernel_3d_iso_uv(x, xpr, params, C):
             lt: t length scale
             
     """
-    eta, ld, lt = params
+    if len(params)==3:
+        eta, ld, lt = params
+        ps = (ld,)
+        pt = (lt,)
+    elif len(params)==5:
+        eta, ld, lt, nu_s, nu_t = params
+        ps = (ld, nu_s)
+        pt = (lt, nu_t)
     Cu, Cv, Cuv, Ct = C
     
     # Build the covariance matrix
@@ -306,18 +340,18 @@ def kernel_3d_iso_uv(x, xpr, params, C):
     #
     C = np.ones((2*n,2*n))
     #
-    C[:n,:n] *= Cu(_x, _y, _d, ld)
-    C[n:,n:] *= Cv(_x, _y, _d, ld)
+    C[:n,:n] *= Cu(_x, _y, _d, *ps)
+    C[n:,n:] *= Cv(_x, _y, _d, *ps)
     #assert False, "need to check two lines below is correct, e.g. isn't a transpose required or a sign change?"
     # it is correct: Cuv = Cuv.T, Cuv is even in terms of x and y
-    C[:n,n:] *= Cuv(_x, _y, _d, ld)
+    C[:n,n:] *= Cuv(_x, _y, _d, *ps)
     C[n:,:n] = C[:n,n:]   # assumes X is indeed duplicated vertically
     #
     #_Cu  = Cu(_x, _y, _d, ld)
     #_Cv  = Cv(_x, _y, _d, ld)
     #_Cuv  = Cuv(_x, _y, _d, ld)
     #C *= np.block([[_Cu, _Cuv],[_Cuv, _Cv]])
-    C *= Ct(x[:,2,None], xpr.T[:,2,None].T, lt)
+    C *= Ct(x[:,2,None], xpr.T[:,2,None].T, *pt)
     C *= eta**2
     
     return C
@@ -336,7 +370,14 @@ def kernel_3d_iso_uv_traj(x, xpr, params, C):
             lt: t length scale
             
     """
-    eta, ld, lt = params
+    if len(params)==3:
+        eta, ld, lt = params
+        ps = (ld,)
+        pt = (lt,)
+    elif len(params)==5:
+        eta, ld, lt, nu_s, nu_t = params
+        ps = (ld, nu_s)
+        pt = (lt, nu_t)
     Cu, Cv, Cuv, Ct = C
     
     # Build the covariance matrix
@@ -346,13 +387,13 @@ def kernel_3d_iso_uv_traj(x, xpr, params, C):
     _d = np.sqrt( _x**2 + _y**2 )
     #
     C = np.ones((2*n,2*n))
-    C[:n,:n] *= Cu(_x, _y, _d, ld)
-    C[n:,n:] *= Cv(_x, _y, _d, ld)
+    C[:n,:n] *= Cu(_x, _y, _d, *ps)
+    C[n:,n:] *= Cv(_x, _y, _d, *ps)
     #assert False, "need to check two lines below is correct, e.g. isn't a transpose required or a sign change"
-    C[:n,n:] *= Cuv(_x, _y, _d, ld)
+    C[:n,n:] *= Cuv(_x, _y, _d, *ps)
     C[n:,:n] = C[:n,n:]   # assumes X is indeed duplicated vertically
     #
-    C *= Ct(x[:,2,None], xpr.T[:,2,None].T, lt)
+    C *= Ct(x[:,2,None], xpr.T[:,2,None].T, *pt)
     # decorrelate different trajectories (moorings/drifters)
     C *= ( (x[:,3,None] - xpr.T[:,3,None].T)==0 ).astype(int)
     C *= eta**2
@@ -856,6 +897,7 @@ def prepare_inference(
     run_dir,
     uv, no_time, no_space, 
     parameter_eta_formulation, traj_decorrelation,
+    enable_nu,
 ):
 
     # load eulerian flow
@@ -871,6 +913,9 @@ def prepare_inference(
     λx = p["lambda_x"]   # km
     λy = p["lambda_y"]   # km
     λt = p["lambda_t"]   # days
+    #
+    νs = p["nu_space"]
+    νt = p["nu_time"]
 
     # derived velocity parameter
     γ = η / λx 
@@ -883,7 +928,7 @@ def prepare_inference(
     # km, km this should not matter
 
     # get 1D covariances
-    C, Ct, isotropy = get_cov_1D(p["cov_x"], p["cov_t"])
+    C, Ct, isotropy = get_cov_1D(p["cov_x"], p["cov_t"], enable_nu)
     Cu, Cv, Cuv = C
     #if "matern32" in p["cov_x"]:
     #    p["nu_space"] = 3/2
@@ -936,8 +981,12 @@ def prepare_inference(
                         return kernel_3d_iso_uv_traj(x, xpr, params, (Cu, Cv, Cuv, Ct))
                     else:
                         return kernel_3d_iso_uv(x, xpr, params, (Cu, Cv, Cuv, Ct))
-                covparams = [γ, λx, λt]
-                labels = ['σ','γ','λx','λt']
+                if enable_nu:
+                    covparams = [γ, λx, λt, νs, νt]
+                    labels = ['σ','γ','λx','λt', 'νs', 'νt']
+                else:
+                    covparams = [γ, λx, λt]
+                    labels = ['σ','γ','λx','λt']
         else:
             covfunc = lambda x, xpr, params: kernel_3d_iso_u(x, xpr, params, (Cu, Ct))
             covparams = [η, λx, λt]

@@ -30,6 +30,7 @@ noise = 0.01 # observation noise added to u/v
 no_time = False # activates time inference
 no_space = False # activates time inference
 traj_decorrelation = False  # artificially decorrelate different moorings/drifters
+enable_nu = False # enable estimation of spectral slopes
 
 # number of points used for inference#
 Nxy, Nt = 8, 50
@@ -81,6 +82,7 @@ def run():
         run_dir,
         uv, no_time, no_space,
         parameter_eta_formulation, traj_decorrelation,
+        enable_nu,
     )
     logging.info("dsf attributes: "+" ;".join([f"{k}/{v}" for k, v in dsf.attrs.items()]))
 
