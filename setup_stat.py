@@ -2,7 +2,8 @@
 
 from distutils.core import setup
 
-setup(name='nwastat',
+setup(name='',
       description='NWA stat tool',
       url='https://github.com/apatlpo/nwa',
-      packages=['stattools'])
+      packages=['stat_tools'])
+
